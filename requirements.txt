@@ -1,0 +1,25 @@
+# core
+numpy
+tqdm
+faster-whisper>=1.0.0          # loads your local ct2 model
+librosa
+soundfile
+rapidfuzz
+jiwer
+datasets>=2.18.0               # Arrow output (Audio feature)
+
+# Persian text
+hazm
+num2fawords
+
+# EPUB / PDF extraction
+ebooklib
+beautifulsoup4
+lxml
+PyMuPDF                        # fast PDF text (import fitz)
+pdfplumber                     # PDF fallback
+
+# optional: CTC aligner (--aligner ctc) and VAD snapping (--vad-snap)
+torch
+transformers
+ctc-segmentation>=1.7

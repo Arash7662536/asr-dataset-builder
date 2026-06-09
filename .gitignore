@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Pipeline outputs
+out/
+*.arrow
+*.wav
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
