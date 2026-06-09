@@ -18,7 +18,9 @@ def worker_main(gpu_id, book_queue, result_queue, out_dir, settings, position):
     from asrbuild.whisper_io import load_whisper
     from asrbuild.pipeline import Models, process_book
 
-    name = f"gpu{gpu_id}"
+    # position is globally unique across workers, so two workers pinned to the
+    # same physical GPU still get their own logger + log file.
+    name = f"gpu{gpu_id}-w{position}"
     log = get_logger(name, os.path.join(out_dir, "logs", f"worker_{name}.log"))
     log.info("worker up; loading models (compute=%s, aligner=%s)",
              settings.compute_type, settings.aligner)

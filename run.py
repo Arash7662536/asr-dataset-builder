@@ -45,13 +45,19 @@ from asrbuild.logging_utils import get_logger
 
 
 def discover_books(root):
-    """A book dir is any immediate subdir of root that has an audio/ folder."""
+    """A book dir is any dir under root that has an audio/ subfolder.
+
+    Searches at any depth, so both the flat layout (<book>/audio) and the
+    nested one (<book>/<book>/audio) work. .zip files alongside the extracted
+    folders are ignored (os.walk only yields directories). We stop descending
+    once a book is found.
+    """
     out = []
-    for name in sorted(os.listdir(root)):
-        d = os.path.join(root, name)
-        if os.path.isdir(d) and os.path.isdir(os.path.join(d, "audio")):
-            out.append(d)
-    return out
+    for dirpath, dirnames, _ in os.walk(root):
+        if "audio" in dirnames and os.path.isdir(os.path.join(dirpath, "audio")):
+            out.append(dirpath)
+            dirnames[:] = []  # don't recurse into a book we've already matched
+    return sorted(out)
 
 
 def shard(books, num_shards, shard_id):
@@ -92,7 +98,11 @@ def main():
     ap.add_argument("--whisper-model", required=True,
                     help="path to your LOCAL ct2 whisper directory")
     ap.add_argument("--gpus", default="0",
-                    help="comma list, one worker per GPU, e.g. 0,1,2,3")
+                    help="comma list of GPU ids, e.g. 0,1,2,3")
+    ap.add_argument("--workers-per-gpu", type=int, default=1,
+                    help="processes per GPU. 2 overlaps one book's CPU work "
+                         "(extract/load/map/export) with another's GPU work; "
+                         "each worker needs ~5 GiB VRAM, so check it fits.")
     ap.add_argument("--compute-type", default=COMPUTE_TYPE)
     ap.add_argument("--ctc-model", default=None)
     ap.add_argument("--aligner", choices=["whisper", "ctc"], default=ALIGNER)
@@ -133,8 +143,11 @@ def main():
     if not books:
         sys.exit("no books found (need <root>/<book>/audio/*.mp3)")
     gpus = [g.strip() for g in args.gpus.split(",") if g.strip() != ""]
-    log.info("%d books · %d gpu workers (%s) · shard %d/%d",
-             len(books), len(gpus), ",".join(gpus), args.shard_id, args.num_shards)
+    wpg = max(1, args.workers_per_gpu)
+    worker_gpus = [g for g in gpus for _ in range(wpg)]  # one entry per worker
+    log.info("%d books · %d gpus x %d workers = %d workers (%s) · shard %d/%d",
+             len(books), len(gpus), wpg, len(worker_gpus),
+             ",".join(gpus), args.shard_id, args.num_shards)
 
     settings = build_settings(args)
     if settings.aligner == "ctc" and not settings.ctc_model:
@@ -147,7 +160,7 @@ def main():
         book_q.put(b)
 
     procs = []
-    for pos, gpu in enumerate(gpus):
+    for pos, gpu in enumerate(worker_gpus):
         p = ctx.Process(target=worker_main,
                         args=(gpu, book_q, result_q, args.out, settings, pos))
         p.start()
