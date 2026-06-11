@@ -6,7 +6,7 @@ librosa
 soundfile
 rapidfuzz
 jiwer
-datasets>=2.18.0               # Arrow output (Audio feature)
+datasets==2.19.0               # Arrow output (Audio feature)
 
 # Persian text
 hazm
