@@ -54,6 +54,7 @@ def discover_books(root):
     """
     out = []
     for dirpath, dirnames, _ in os.walk(root):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]  # skip hidden dirs like .cache
         if "audio" in dirnames and os.path.isdir(os.path.join(dirpath, "audio")):
             out.append(dirpath)
             dirnames[:] = []  # don't recurse into a book we've already matched

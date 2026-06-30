@@ -42,12 +42,41 @@ def _is_frontback(norm_text):
     return hits >= 1 and len(norm_text) < 1500
 
 
+def _iter_epub_blocks_raw(path):
+    """Fallback: read epub as a plain zip and extract all HTML/XHTML items."""
+    import zipfile
+    from bs4 import BeautifulSoup
+    with zipfile.ZipFile(path, "r") as zf:
+        html_names = sorted(
+            n for n in zf.namelist()
+            if n.lower().endswith((".html", ".xhtml", ".htm"))
+        )
+        for name in html_names:
+            try:
+                content = zf.read(name)
+            except KeyError:
+                continue
+            soup = BeautifulSoup(content, "lxml-xml")
+            for tag in soup(["script", "style", "sup", "sub"]):
+                tag.decompose()
+            yield soup.get_text(separator=" ")
+
+
 def _iter_epub_blocks(path):
     from ebooklib import epub, ITEM_DOCUMENT
     from bs4 import BeautifulSoup
-    book = epub.read_epub(path)
+    try:
+        book = epub.read_epub(path, options={"ignore_ncx": True})
+    except Exception:
+        # epub manifest is broken (missing zip entries, etc.) — parse raw
+        yield from _iter_epub_blocks_raw(path)
+        return
     for item in book.get_items_of_type(ITEM_DOCUMENT):       # spine/reading order
-        soup = BeautifulSoup(item.get_content(), "lxml-xml")
+        try:
+            content = item.get_content()
+        except Exception:
+            continue
+        soup = BeautifulSoup(content, "lxml-xml")
         for tag in soup(["script", "style", "sup", "sub"]):
             tag.decompose()                                  # kill footnote markers
         yield soup.get_text(separator=" ")
