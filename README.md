@@ -8,16 +8,40 @@ This is the *new* alignment setup (Whisper word-timestamp matching by default,
 robust to twisted/paraphrased narration), with the round-trip verifier
 **hardened** against premature truncations and silence/music.
 
-## Input layout
+## Input — what you point `--root` at
+
+**One directory per book. Each book needs an `audio/` folder of MP3s and a
+`text/` folder with the book itself (EPUB preferred, PDF works).** Nothing else
+is required, and the MP3 filenames are meaningless to the tool.
 
 ```
-<root>/
-  130127/
-    audio/  09b1....mp3  61c9....mp3  ...
-    text/   131179.epub          # or a .pdf, or (skipped) missing
+<root>/                        <-- this is --root
+  130127/                      <-- one dir per book; the name becomes the book id
+    audio/                     <-- REQUIRED. *.mp3, any names, any order
+      09b1f3....mp3
+      61c9aa....mp3
+      ...
+    text/                      <-- REQUIRED. exactly one book file is used
+      131179.epub              # .epub preferred; .pdf is the fallback
   130241/
-    ...
+    audio/ ...
+    text/  book.pdf
+  ...
 ```
+
+Details that are handled for you:
+
+* **A dir counts as a book if it contains an `audio/` subdir**, at any depth — so
+  `<root>/130127/audio` and `<root>/130127/130127/audio` both work. `.zip` files
+  lying around next to extracted folders are ignored.
+* **MP3 order does not matter and is not read from the filename.** Each MP3 is
+  rough-transcribed, anchored into the book text with rapidfuzz, and the reading
+  order is recovered from the matched offsets.
+* **Byte-identical MP3s are dropped** (md5, per book).
+* **`text/` with no `.epub`/`.pdf`, or an empty `audio/`** → the book is skipped
+  with a logged reason and a `_DONE` marker, so it is not retried.
+* Audio is decoded to **16 kHz mono** internally; the source MP3 bitrate/rate
+  doesn't matter.
 
 ## Output
 
@@ -31,21 +55,63 @@ robust to twisted/paraphrased narration), with the round-trip verifier
 
 Each row:
 
-| column    | type                                             |
-|-----------|--------------------------------------------------|
-| `audio`   | HF `Audio` → decodes to `{path, array, sampling_rate}` (16 kHz) |
-| `text`    | `string` — book ground truth                     |
-| `metrics` | struct — `tier, match_ratio, cer, wer, lcs_ratio, len_ratio, precision, duration, source_mp3, hyp` |
+| column       | type                                             |
+|--------------|--------------------------------------------------|
+| `audio`      | HF `Audio` → decodes to `{path, array, sampling_rate}` (16 kHz) |
+| `text`       | `string` — book ground truth, **with punctuation** |
+| `text_plain` | `string` — the same text, punctuation stripped   |
+| `metrics`    | struct — `tier, match_ratio, cer, wer, lcs_ratio, len_ratio, precision, duration, source_mp3, hyp` |
 
 Load it later with:
 
 ```python
 from datasets import load_from_disk
 ds = load_from_disk("out/dataset_keep")
-ds[0]["audio"]    # {'path':..., 'array': np.float32[...], 'sampling_rate':16000}
-ds[0]["text"]     # 'سایم گفت ...'
-ds[0]["metrics"]  # {'tier':'keep','cer':0.04, ...}
+ds[0]["audio"]       # {'path':..., 'array': np.float32[...], 'sampling_rate':16000}
+ds[0]["text"]        # 'سلام، حال شما چطور است؟'
+ds[0]["text_plain"]  # 'سلام حال شما چطور است'
+ds[0]["metrics"]     # {'tier':'keep','cer':0.04, ...}
 ```
+
+## Punctuation (strip for matching, restore for export)
+
+The ground truth keeps `.` `،` `؟` `!` `؛` `:` and `...`. Whisper, however, is
+only ever compared against a **punctuation-free** copy of the same sentence:
+
+```
+book sentence ──► normalize_fa(keep_punct=True) ──► text        (exported)
+                            └─► strip_punct() ──► text_plain    (all matching)
+```
+
+Everything that compares text to audio — the mp3→book anchoring, the word-level
+alignment against Whisper word timestamps, and the round-trip CER/WER/LCS gate —
+runs on `text_plain`, exactly as before. The punctuated string is carried
+alongside and written out at the end, so **punctuation cannot change a single
+alignment score or keep/review/drop decision**. This matters a lot: on a
+*perfect* clip, comparing the punctuated text to Whisper's unpunctuated output
+scores WER ≈ 0.30 and would demote it to `review`.
+
+The invariant `strip_punct(normalize_fa(t, keep_punct=True)) == normalize_fa(t)`
+is what guarantees it; `tests/test_normalize_punct.py` checks it (plain
+`python tests/test_normalize_punct.py`, no pytest needed).
+
+Configure in [config.py](config.py):
+
+| knob | default | meaning |
+|------|---------|---------|
+| `KEEP_PUNCTUATION` | `True` | `--no-punctuation` reverts to the old stripped `text` |
+| `KEEP_PUNCT_CHARS` | `".،؟!؛:"` | add `«»`, `-`, `()`, `"` here if you want them kept too |
+| `PUNCT_STYLE` | `"persian"` | folds `,` `?` `;` → `،` `؟` `؛` (use `"ascii"` for the reverse) |
+| `ELLIPSIS_AS` | `"..."` | `"…"` to keep the single char, `""` to drop ellipses |
+
+Normalization also: collapses `؟؟؟` → `؟` and mixed runs (`؟!` → `؟`), puts no
+space before a mark and exactly one after, and never lets a sentence open with
+one. Marks outside `KEEP_PUNCT_CHARS` (quotes, brackets, dashes) are removed as
+before.
+
+> Note: `text_plain` is a new column. Shards written by an older run cannot be
+> merged with new ones — `merge.py` now says so instead of failing obscurely.
+> Delete the old `<out>/shards/*` and re-run, or merge them separately.
 
 ## Run
 
@@ -53,11 +119,16 @@ ds[0]["metrics"]  # {'tier':'keep','cer':0.04, ...}
 pip install -r requirements.txt
 
 python run.py \
-  --root /workspace/part_02/extracted \
-  --out  /workspace/out \
+  --root /workspace/part_02/extracted \      # dir of <book>/audio + <book>/text
+  --out  /workspace/out \                    # everything is written here
   --whisper-model /workspace/models/my-ct2-whisper \   # YOUR local ct2 dir
   --gpus 0,1,2,3
 ```
+
+Only those four flags are needed. `--whisper-model` is a **path to a converted
+CTranslate2 directory** (the one holding `model.bin` + `config.json`), not a HF
+model id. Re-running the same command resumes: books with a
+`<out>/shards/<book>/_DONE` marker are skipped.
 
 Across multiple machines (each its own `--out`, then collect):
 
@@ -78,6 +149,8 @@ python merge.py --out /workspace/out
 
 ## What was changed vs the old script (your requests)
 
+* **Punctuation is kept** in the exported `text` while every match still runs on
+  the stripped `text_plain` — see the section above.
 * **Hardened round-trip (fix 4).** `transcribe_chunk` now uses `beam_size=5`
   and `condition_on_previous_text=False`, which turns most `سایم گفت`
   premature-stop truncations into full transcriptions. Tune with
@@ -126,6 +199,7 @@ All defaults live in `config.py`; the ones you'll touch most:
 | keep length tol | `--len-tol` | 0.25 | catches dropped/added clauses |
 | aligner | `--aligner` | whisper | `ctc` for verbatim audiobooks |
 | min word match | `--min-match` | 0.30 | drop sentence below this overlap |
+| punctuation | `--no-punctuation` | kept | strip it from `text` (old behaviour) |
 
 ## Recommended GPU setup (vast.ai)
 

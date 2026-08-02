@@ -28,6 +28,20 @@ def _load_all(shard_glob, sub):
     return parts
 
 
+def _check_same_schema(parts, sub):
+    """concatenate_datasets() fails obscurely on mixed schemas. The usual cause
+    is shards from before the `text_plain` (punctuation) column existed sitting
+    next to new ones, so say that plainly instead."""
+    cols = {tuple(sorted(p.column_names)) for p in parts}
+    if len(cols) > 1:
+        raise SystemExit(
+            f"error: {sub} shards have different columns: "
+            + " vs ".join(str(list(c)) for c in cols)
+            + "\n  Shards written before/after the punctuation change cannot be "
+              "merged.\n  Delete the older <out>/shards/* (or merge them into a "
+              "separate dataset) and re-run.")
+
+
 def merge(out_dir):
     from datasets import concatenate_datasets
     shard_glob = os.path.join(out_dir, "shards", "*")
@@ -36,6 +50,7 @@ def merge(out_dir):
     review = _load_all(shard_glob, "review_ds")
 
     if keep:
+        _check_same_schema(keep, "keep_ds")
         ds = concatenate_datasets(keep)
         ds.save_to_disk(os.path.join(out_dir, "dataset_keep"))
         hrs = sum(ds["metrics"][i]["duration"] for i in range(len(ds))) / 3600 \
@@ -45,6 +60,7 @@ def merge(out_dir):
         print("dataset_keep:   0 clips")
 
     if review:
+        _check_same_schema(review, "review_ds")
         rv = concatenate_datasets(review)
         rv.save_to_disk(os.path.join(out_dir, "dataset_review"))
         print(f"dataset_review: {len(rv)} clips")

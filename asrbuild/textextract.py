@@ -14,7 +14,7 @@ import os
 
 from config import FRONTBACK_KEYWORDS
 from .dtypes import Sentence
-from .normalize import pre_normalize, normalize_fa, sent_split
+from .normalize import pre_normalize, normalize_fa, sent_split, strip_punct
 
 
 class MissingTextError(Exception):
@@ -98,11 +98,16 @@ def _iter_pdf_blocks(path):
             yield page.extract_text() or ""
 
 
-def extract_book(text_dir, drop_frontback=True):
+def extract_book(text_dir, drop_frontback=True, keep_punct=True):
     """Extract + normalize the book into (sentences, book_text).
 
-    sentences : list[Sentence] with continuous char offsets
-    book_text : the sentences joined by single spaces (for fuzzy mapping)
+    sentences : list[Sentence] with continuous char offsets. Each carries the
+                punctuated ground truth (.text) and its punctuation-free
+                matching form (.norm).
+    book_text : the sentences' MATCHING forms joined by single spaces. Offsets
+                index into this string, and Whisper transcripts are normalized
+                the same punctuation-free way, so fuzzy mapping is unaffected by
+                the punctuation we keep for export.
     """
     path, kind = find_text_file(text_dir)
     blocks = _iter_epub_blocks(path) if kind == "epub" else _iter_pdf_blocks(path)
@@ -115,12 +120,13 @@ def extract_book(text_dir, drop_frontback=True):
         if drop_frontback and _is_frontback(pre):
             continue
         for s in sent_split(pre):
-            s = normalize_fa(s)                              # strip per sentence
-            if len(s) < 2:
+            disp = normalize_fa(s, keep_punct=keep_punct)    # per-sentence
+            norm = strip_punct(disp) if keep_punct else disp
+            if len(norm) < 2:
                 continue
-            sentences.append(Sentence(text=s, offset=cursor))
-            book_chars.append(s)
-            cursor += len(s) + 1                             # +1 for join space
+            sentences.append(Sentence(text=disp, offset=cursor, norm=norm))
+            book_chars.append(norm)
+            cursor += len(norm) + 1                          # +1 for join space
 
     if not sentences:
         raise MissingTextError(f"{os.path.basename(path)} produced 0 sentences")

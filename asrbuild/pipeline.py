@@ -54,7 +54,8 @@ def process_book(book_dir, shard_dir, settings, models, log, position=0):
     try:
         with stage(log, book_id, "A"):
             sentences, book_text, (src, kind) = extract_book(
-                text_dir, drop_frontback=settings.drop_frontback)
+                text_dir, drop_frontback=settings.drop_frontback,
+                keep_punct=settings.keep_punctuation)
         log.info("[%s][A] %s: %d sentences, %d chars",
                  book_id, kind, len(sentences), len(book_text))
     except MissingTextError as e:

@@ -20,6 +20,7 @@ def merge_segments(segs):
             return
         chunks.append(Chunk(
             text=" ".join(s.text for s in buf),
+            norm=" ".join(s.norm for s in buf),
             start=start, end=end,
             score=min(s.score for s in buf),
         ))

@@ -89,6 +89,20 @@ PRECISION_REVIEW_MIN = 0.90      # used only when ENABLE_PRECISION_REVIEW is Tru
 
 
 # --------------------------------------------------------------------------- #
+# Punctuation in the ground truth
+# --------------------------------------------------------------------------- #
+# The dataset `text` column keeps these marks. Matching NEVER sees them: the
+# mp3->book mapping, the word-level alignment and the round-trip CER/WER all run
+# on a punctuation-free copy of the same sentence (`text_plain`), so punctuation
+# cannot influence a keep/review/drop decision. See asrbuild/normalize.py.
+KEEP_PUNCTUATION = True
+PUNCT_STYLE = "persian"          # "persian": , ? ; -> ، ؟ ؛  ·  "ascii": reverse
+KEEP_PUNCT_CHARS = ".،؟!؛:"      # written in either style; folded to PUNCT_STYLE
+                                 # add «» - () " here if you want those too
+ELLIPSIS_AS = "..."              # "" drops ellipses; "…" keeps the single char
+
+
+# --------------------------------------------------------------------------- #
 # Front/back-matter coarse drop (Persian keywords)
 # --------------------------------------------------------------------------- #
 FRONTBACK_KEYWORDS = [
@@ -125,6 +139,8 @@ class Settings:
     tiers_to_export: Tuple[str, ...] = TIERS_TO_EXPORT
     enable_precision_review: bool = ENABLE_PRECISION_REVIEW
     precision_review_min: float = PRECISION_REVIEW_MIN
+
+    keep_punctuation: bool = KEEP_PUNCTUATION
 
     drop_frontback: bool = DROP_FRONTBACK
     keep_rejected: bool = False

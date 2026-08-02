@@ -44,7 +44,8 @@ def _features():
     }
     return Features({
         "audio": Audio(sampling_rate=SR),
-        "text": Value("string"),
+        "text": Value("string"),          # book ground truth, WITH punctuation
+        "text_plain": Value("string"),    # same text, punctuation stripped
         "metrics": metric_struct,
     })
 
@@ -69,7 +70,8 @@ def export_and_filter(chunks, audio, mp3_name, audio_dir, settings,
         fname = f"{base}_{i:04d}.wav"
 
         audit = {
-            "file_name": None, "text": c.text, "duration": dur,
+            "file_name": None, "text": c.text, "text_plain": c.norm,
+            "duration": dur,
             "source_mp3": os.path.basename(mp3_name),
             "match_ratio": round(float(c.score), 4),
             "cer": None, "wer": None, "lcs_ratio": None,
@@ -94,7 +96,9 @@ def export_and_filter(chunks, audio, mp3_name, audio_dir, settings,
                 vad_filter=settings.roundtrip_vad,
                 vad_min_silence_ms=settings.roundtrip_vad_min_silence_ms,
             )
-            m = text_metrics(c.text, hyp)
+            # hyp is normalized punctuation-free, so compare against c.norm —
+            # punctuation must never move a metric or a tier.
+            m = text_metrics(c.norm, hyp)
             audit.update(hyp=hyp, **m)
             tier = purity_tier(
                 m, settings.max_cer, settings.min_lcs, settings.len_tol,
@@ -118,7 +122,8 @@ def export_and_filter(chunks, audio, mp3_name, audio_dir, settings,
             "precision": m.get("precision"), "duration": dur,
             "source_mp3": os.path.basename(mp3_name), "hyp": audit["hyp"],
         }
-        row = {"audio": fpath, "text": c.text, "metrics": metrics_col}
+        row = {"audio": fpath, "text": c.text, "text_plain": c.norm,
+               "metrics": metrics_col}
 
         if tier in settings.tiers_to_export:
             audit["file_name"] = f"audio/{fname}"
@@ -144,6 +149,7 @@ def save_shard(keep_rows, review_rows, audit_rows, shard_dir):
     def _to_ds(rows):
         cols = {"audio": [r["audio"] for r in rows],
                 "text": [r["text"] for r in rows],
+                "text_plain": [r["text_plain"] for r in rows],
                 "metrics": [r["metrics"] for r in rows]}
         return Dataset.from_dict(cols, features=feats)
 

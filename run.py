@@ -85,6 +85,7 @@ def build_settings(args):
     s.min_lcs = args.min_lcs
     s.len_tol = args.len_tol
     s.enable_precision_review = args.precision_review
+    s.keep_punctuation = not args.no_punctuation
     s.keep_rejected = args.keep_rejected
     if args.export_review:
         s.tiers_to_export = ("keep", "review")
@@ -126,6 +127,10 @@ def main():
                          "to review instead of drop")
     ap.add_argument("--export-review", action="store_true",
                     help="include review tier in the training dataset too")
+    ap.add_argument("--no-punctuation", action="store_true",
+                    help="strip punctuation from the ground truth (pre-0.2 "
+                         "behaviour); by default . ، ؟ ! ؛ : ... are kept in "
+                         "`text` and matching uses `text_plain`")
     ap.add_argument("--vad-snap", action="store_true",
                     help="snap chunk edges to silero-vad boundaries")
     ap.add_argument("--keep-rejected", action="store_true")

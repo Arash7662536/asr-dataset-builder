@@ -50,7 +50,7 @@ def align_via_whisper(whisper, audio, sentences, min_match=0.3):
 
     B, owner = [], []
     for si, s in enumerate(sentences):
-        for tok in s.text.split():
+        for tok in s.norm.split():                           # match punct-free
             B.append(tok)
             owner.append(si)
     if not B:
@@ -92,7 +92,8 @@ def align_via_whisper(whisper, audio, sentences, min_match=0.3):
         start, end = first_t[si], last_t[si]
         if end <= start:
             continue
-        out.append(AlignedSeg(text=s.text, start=start, end=end, score=ratio))
+        out.append(AlignedSeg(text=s.text, start=start, end=end, score=ratio,
+                              norm=s.norm))
     out.sort(key=lambda a: a.start)
     return out
 
@@ -168,12 +169,16 @@ def align_file(ctc, audio, sentences, log=None):
     config.blank = ctc.blank_id
     config.index_duration = (len(audio) / SR) / n_frames
 
+    # The CTC vocab holds letters only, so tokenize (and score) the punctuation-
+    # free form; the punctuated form is carried along only to be returned.
     texts = [s.text for s in sentences]
+    norms = [s.norm for s in sentences]
     word_delim = "|" if "|" in ctc.vocab else " "
-    token_list = [_tokenize(t, ctc.vocab, word_delim) for t in texts]
+    token_list = [_tokenize(t, ctc.vocab, word_delim) for t in norms]
 
     keep = [i for i, tk in enumerate(token_list) if len(tk) > 0]
     texts = [texts[i] for i in keep]
+    norms = [norms[i] for i in keep]
     token_list = [token_list[i] for i in keep]
     if not token_list:
         return []
@@ -192,7 +197,7 @@ def align_file(ctc, audio, sentences, log=None):
         ground_truth_mat, utt_begin_indices = cs.prepare_token_list(config, token_list)
         timings, char_probs, _ = cs.ctc_segmentation(config, logprobs, ground_truth_mat)
         segments = cs.determine_utterance_segments(
-            config, utt_begin_indices, char_probs, timings, texts
+            config, utt_begin_indices, char_probs, timings, norms
         )
     except AssertionError as e:                              # belt-and-suspenders
         if log:
@@ -200,7 +205,7 @@ def align_file(ctc, audio, sentences, log=None):
         return []
 
     out = []
-    for text, (start, end, score) in zip(texts, segments):
+    for text, norm, (start, end, score) in zip(texts, norms, segments):
         out.append(AlignedSeg(text=text, start=float(start),
-                              end=float(end), score=float(score)))
+                              end=float(end), score=float(score), norm=norm))
     return out
